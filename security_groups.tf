@@ -3,7 +3,7 @@
 ########################################
 
 resource "aws_security_group" "runner" {
-  name_prefix = "${var.environment}-security-group"
+  name_prefix = local.name_sg
   vpc_id      = var.vpc_id
   description = var.gitlab_runner_security_group_description
 
@@ -33,69 +33,8 @@ resource "aws_security_group" "runner" {
 }
 
 ########################################
-## CIDR ranges to runner agent        ##
-########################################
-
-# Allow SSH traffic from allowed cidr blocks to gitlab-runner agent instances
-resource "aws_security_group_rule" "runner_ssh" {
-  count = length(var.gitlab_runner_ssh_cidr_blocks) > 0 && var.enable_gitlab_runner_ssh_access ? length(var.gitlab_runner_ssh_cidr_blocks) : 0
-
-  type      = "ingress"
-  from_port = 22
-  to_port   = 22
-  protocol  = "tcp"
-
-  cidr_blocks       = [element(var.gitlab_runner_ssh_cidr_blocks, count.index)]
-  security_group_id = aws_security_group.runner.id
-
-  description = format(
-    "Allow SSH traffic from %s to gitlab-runner agent instances in group %s",
-    element(var.gitlab_runner_ssh_cidr_blocks, count.index),
-    aws_security_group.runner.name
-  )
-}
-
-# Allow ICMP traffic from allowed cidr blocks to gitlab-runner agent instances
-resource "aws_security_group_rule" "runner_ping" {
-  count = length(var.gitlab_runner_ssh_cidr_blocks) > 0 && var.enable_ping ? length(var.gitlab_runner_ssh_cidr_blocks) : 0
-
-  type      = "ingress"
-  from_port = -1
-  to_port   = -1
-  protocol  = "icmp"
-
-  cidr_blocks       = [element(var.gitlab_runner_ssh_cidr_blocks, count.index)]
-  security_group_id = aws_security_group.runner.id
-
-  description = format(
-    "Allow ICMP traffic from %s to gitlab-runner agent instances in group %s",
-    element(var.gitlab_runner_ssh_cidr_blocks, count.index),
-    aws_security_group.runner.name
-  )
-}
-
-########################################
 ## Security group IDs to runner agent ##
 ########################################
-
-# Allow SSH traffic from allowed security group IDs to gitlab-runner agent instances
-resource "aws_security_group_rule" "runner_ssh_group" {
-  count = length(var.gitlab_runner_security_group_ids) > 0 && var.enable_gitlab_runner_ssh_access ? length(var.gitlab_runner_security_group_ids) : 0
-
-  type      = "ingress"
-  from_port = 22
-  to_port   = 22
-  protocol  = "tcp"
-
-  source_security_group_id = element(var.gitlab_runner_security_group_ids, count.index)
-  security_group_id        = aws_security_group.runner.id
-
-  description = format(
-    "Allow SSH traffic from %s to gitlab-runner agent instances in group %s",
-    element(var.gitlab_runner_security_group_ids, count.index),
-    aws_security_group.runner.name
-  )
-}
 
 # Allow ICMP traffic from allowed security group IDs to gitlab-runner agent instances
 resource "aws_security_group_rule" "runner_ping_group" {
@@ -121,9 +60,26 @@ resource "aws_security_group_rule" "runner_ping_group" {
 ########################################
 
 resource "aws_security_group" "docker_machine" {
-  name_prefix = "${var.environment}-docker-machine"
+  name_prefix = "${local.name_sg}-docker-machine"
   vpc_id      = var.vpc_id
   description = var.docker_machine_security_group_description
+
+  dynamic "egress" {
+    for_each = var.docker_machine_egress_rules
+    iterator = each
+
+    content {
+      cidr_blocks      = each.value.cidr_blocks
+      ipv6_cidr_blocks = each.value.ipv6_cidr_blocks
+      prefix_list_ids  = each.value.prefix_list_ids
+      from_port        = each.value.from_port
+      protocol         = each.value.protocol
+      security_groups  = each.value.security_groups
+      self             = each.value.self
+      to_port          = each.value.to_port
+      description      = each.value.description
+    }
+  }
 
   tags = merge(
     local.tags,
@@ -160,28 +116,23 @@ resource "aws_security_group_rule" "docker_machine_docker_runner" {
 
 # Combine runner security group id and additional security group IDs
 locals {
-  # Always include the runner security group id, add additional if ssh is enabled
-  security_groups_ssh = var.enable_gitlab_runner_ssh_access && length(var.gitlab_runner_security_group_ids) > 0 ? concat(var.gitlab_runner_security_group_ids, [aws_security_group.runner.id]) : [aws_security_group.runner.id]
-
   # Only include runner security group id and addtional if ping is enabled
   security_groups_ping = var.enable_ping && length(var.gitlab_runner_security_group_ids) > 0 ? concat(var.gitlab_runner_security_group_ids, [aws_security_group.runner.id]) : []
 }
 
 # Allow SSH traffic from gitlab-runner agent instances and security group IDs to docker-machine instances
 resource "aws_security_group_rule" "docker_machine_ssh_runner" {
-  count = length(local.security_groups_ssh)
-
   type      = "ingress"
   from_port = 22
   to_port   = 22
   protocol  = "tcp"
 
-  source_security_group_id = element(local.security_groups_ssh, count.index)
+  source_security_group_id = aws_security_group.runner.id
   security_group_id        = aws_security_group.docker_machine.id
 
   description = format(
     "Allow SSH traffic from %s to docker-machine instances in group %s on port 22",
-    element(local.security_groups_ssh, count.index),
+    aws_security_group.runner.id,
     aws_security_group.docker_machine.name
   )
 }
@@ -254,26 +205,6 @@ resource "aws_security_group_rule" "docker_machine_ping_self" {
 
   description = format(
     "Allow ICMP traffic within group %s",
-    aws_security_group.docker_machine.name,
-  )
-}
-
-########################################
-## Egress Security rules              ##
-########################################
-
-# Allow egress traffic from docker-machine instances
-resource "aws_security_group_rule" "out_all" {
-  type        = "egress"
-  from_port   = 0
-  to_port     = 65535
-  protocol    = "-1"
-  cidr_blocks = ["0.0.0.0/0"]
-
-  security_group_id = aws_security_group.docker_machine.id
-
-  description = format(
-    "Allow egress traffic for group %s",
     aws_security_group.docker_machine.name,
   )
 }

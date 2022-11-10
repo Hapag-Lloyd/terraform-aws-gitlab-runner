@@ -5,12 +5,12 @@ output "runner_as_group_name" {
 
 output "runner_cache_bucket_arn" {
   description = "ARN of the S3 for the build cache."
-  value       = module.cache.arn
+  value       = element(concat(module.cache.*.arn, [""]), 0)
 }
 
 output "runner_cache_bucket_name" {
   description = "Name of the S3 for the build cache."
-  value       = module.cache.bucket
+  value       = element(concat(module.cache.*.bucket, [""]), 0)
 }
 
 output "runner_agent_role_arn" {
@@ -65,4 +65,8 @@ output "config_bucket" {
 output "cloudtrail_bucket" {
   value       = module.config.cloudtrail_bucket
   description = "Name of CloudTrail bucket used by automatic config updates."
+}
+output "runner_launch_template_name" {
+  description = "The name of the runner's launch template."
+  value       = aws_launch_template.gitlab_runner_instance.name
 }

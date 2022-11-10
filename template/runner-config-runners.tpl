@@ -1,6 +1,7 @@
 [[runners]]
   name = "${name}"
   url = "${gitlab_url}"
+  clone_url = "${gitlab_clone_url}"
   token = "${token}"
   executor = "${executor}"
   environment = ${environment_vars}
@@ -14,10 +15,11 @@
     tls_verify = false
     image = "${image}"
     privileged = ${privileged}
-    disable_cache = false
+    disable_cache = ${disable_cache}
     volumes = ["/cache"${additional_volumes}]
+    extra_hosts = ${jsonencode(extra_hosts)}
     shm_size = ${shm_size}
-    pull_policy = "${pull_policy}"
+    allowed_pull_policies = ${pull_policies}
     runtime = "${docker_runtime}"
     helper_image = "${helper_image}"
   [runners.docker.tmpfs]
@@ -28,6 +30,7 @@
     Type = "s3"
     Shared = ${shared_cache}
     [runners.cache.s3]
+      AuthenticationType = "${auth_type}"
       ServerAddress = "s3.amazonaws.com"
       BucketName = "${bucket_name}"
       BucketLocation = "${aws_region}"
@@ -50,7 +53,7 @@
       "amazonec2-request-spot-instance=${request_spot_instance}",
       "amazonec2-spot-price=${spot_price_bid}",
       "amazonec2-security-group=${security_group_name}",
-      "amazonec2-tags=${tags}",
+      "amazonec2-tags=${runners_tags},__PARENT_TAG__",
       "amazonec2-use-ebs-optimized-instance=${ebs_optimized}",
       "amazonec2-monitoring=${monitoring}",
       "amazonec2-iam-instance-profile=%{ if iam_instance_profile_name != "" }${iam_instance_profile_name}%{ else }${instance_profile}%{ endif ~}",

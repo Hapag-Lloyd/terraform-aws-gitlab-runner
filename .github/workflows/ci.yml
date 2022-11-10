@@ -1,54 +1,92 @@
 name: CI
-on: 
+on:
   push:
     branches:
-      - master
+      - main
       - develop
   pull_request:
-    
 
 jobs:
   verify_module:
     name: Verify module
     strategy:
       matrix:
-        terraform: [0.13.6]    
+        terraform: [1.1.9]
     runs-on: ubuntu-latest
     container:
       image: hashicorp/terraform:${{ matrix.terraform }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - run: terraform init -get -backend=false -input=false
       - run: terraform fmt -recursive -check=true -write=false
 
   verify_examples:
     name: Verify examples
     strategy:
+      fail-fast: false
       matrix:
-        terraform: [0.13.6, 0.14.5, latest]
-        example: ["runner-default", "runner-docker", "runner-pre-registered", "runner-public"]
+        terraform: [1.0.11, latest]
+        example:
+          [
+            "runner-default",
+            "runner-docker",
+            "runner-multi-region",
+            "runner-pre-registered",
+            "runner-public",
+          ]
     defaults:
       run:
         working-directory: examples/${{ matrix.example }}
     runs-on: ubuntu-latest
     container:
       image: hashicorp/terraform:${{ matrix.terraform }}
-    steps:   
-      - uses: actions/checkout@v2
+    steps:
+      - uses: actions/checkout@v3
       - run: terraform init -get -backend=false -input=false
-      - run: terraform fmt -recursive -check=true -write=false
+      - if: contains(matrix.terraform, '1.0.')
+        run: terraform fmt -recursive -check=true -write=false
       - run: terraform validate
 
+  docs:
+    # update docs after merge back to develop
+    if: github.event_name != 'pull_request' && contains('refs/heads/develop', github.ref)
+    name: Auto update terraform docs
+    needs: [verify_module, verify_examples]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: CHeckout branch
+      uses: actions/checkout@v3
+
+    - name: Generate TF docs
+      uses: terraform-docs/gh-actions@v1.0.0
+      with:
+        find-dir: .
+        git-commit-message: "docs: auto update terraform docs"
+        git-push: true
+
+  tfsec:
+    name: tfsec PR commenter
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@master
+      - name: tfsec
+        uses: aquasecurity/tfsec-pr-commenter-action@v1.2.0
+        with:
+          github_token: ${{ github.token }}
 
   release:
-    if: github.event_name != 'pull_request' && contains('refs/heads/master', github.ref)
+    if: github.event_name != 'pull_request' && contains('refs/heads/main', github.ref)
     name: Release
     needs: [verify_module, verify_examples]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Get installation token
         uses: npalm/action-app-token@v1.0.0

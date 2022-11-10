@@ -1,5 +1,16 @@
+# Install jq if not exists
+if ! [ -x "$(command -v jq)" ]; then
+  yum install jq -y
+fi
+
+# Provide the parent instance id in the spawned runner tags
+PARENT_INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .instanceId)
+PARENT_TAG="gitlab-runner-parent-id,$${PARENT_INSTANCE_ID}"
+
 mkdir -p /etc/gitlab-runner
 aws s3 cp "${runners_config_s3_uri}" "/etc/gitlab-runner/config.toml"
+
+sed -i.bak s/__PARENT_TAG__/`echo $PARENT_TAG`/g /etc/gitlab-runner/config.toml
 
 ${pre_install}
 
@@ -19,12 +30,20 @@ then
   fi
 fi
 
-curl --fail --retry 6 -L https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.rpm.sh | bash
-yum install gitlab-runner-${gitlab_runner_version} -y
+if [[ `echo ${runners_install_amazon_ecr_credential_helper}` == "true" ]]
+then
+  yum install amazon-ecr-credential-helper -y
+fi
+
+if ! ( rpm -q gitlab-runner >/dev/null )
+then
+  curl --fail --retry 6 -L https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.rpm.sh | bash
+  yum install gitlab-runner-${gitlab_runner_version} -y
+fi
 
 if [[ `echo ${docker_machine_download_url}` == "" ]]
 then
-  curl --fail --retry 6 -L https://github.com/docker/machine/releases/download/v${docker_machine_version}/docker-machine-`uname -s`-`uname -m` >/tmp/docker-machine
+  curl --fail --retry 6 -L https://gitlab.com/gitlab-org/ci-cd/docker-machine/-/releases/v${docker_machine_version}/downloads/docker-machine-`uname -s`-`uname -m` >/tmp/docker-machine
 else
   curl --fail --retry 6 -L ${docker_machine_download_url} >/tmp/docker-machine
 fi
@@ -44,13 +63,17 @@ docker-machine rm -y dummy-machine
 unset HOME
 unset USER
 
-# Install jq if not exists
-if ! [ -x "$(command -v jq)" ]; then
-  yum install jq -y
+# fetch Runner token from SSM and validate it
+token=$(aws ssm get-parameters --names "${secure_parameter_store_runner_token_key}" --with-decryption --region "${secure_parameter_store_region}" | jq -r ".Parameters | .[0] | .Value")
+
+valid_token=true
+if [[ `echo $token` != "null" ]]
+then
+  valid_token_response=$(curl -s -o /dev/null -w "%%{response_code}" --request POST -L "${runners_gitlab_url}/api/v4/runners/verify" --form "token=$token" )
+  [[ `echo $valid_token_response` != "200" ]] && valid_token=false
 fi
 
-token=$(aws ssm get-parameters --names "${secure_parameter_store_runner_token_key}" --with-decryption --region "${secure_parameter_store_region}" | jq -r ".Parameters | .[0] | .Value")
-if [[ `echo ${runners_token}` == "__REPLACED_BY_USER_DATA__" && `echo $token` == "null" ]]
+if [[ `echo ${runners_token}` == "__REPLACED_BY_USER_DATA__" && `echo $token` == "null" ]] || [[ `echo $valid_token` == "false" ]]
 then
   token=$(curl --request POST -L "${runners_gitlab_url}/api/v4/runners" \
     --form "token=${gitlab_runner_registration_token}" \
@@ -66,7 +89,17 @@ fi
 
 sed -i.bak s/__REPLACED_BY_USER_DATA__/`echo $token`/g /etc/gitlab-runner/config.toml
 
-# A small script to remove this runner from being registered with Gitlab. 
+ssm_sentry_dsn=$(aws ssm get-parameters --names "${secure_parameter_store_runner_sentry_dsn}" --with-decryption --region "${secure_parameter_store_region}" | jq -r ".Parameters | .[0] | .Value")
+if [[ `echo ${sentry_dsn}` == "__SENTRY_DSN_REPLACED_BY_USER_DATA__" && `echo $ssm_sentry_dsn` == "null" ]]
+then
+  ssm_sentry_dsn=""
+fi
+
+# For those of you wondering why commas are used in the sed below instead of forward slashes, see https://stackoverflow.com/a/16778711/13169919
+# It is because the Sentry DSN contains forward slashes as it is an URL so it would break out of the sed command with forward slashes as delimiters :)
+sed -i.bak s,__SENTRY_DSN_REPLACED_BY_USER_DATA__,`echo $ssm_sentry_dsn`,g /etc/gitlab-runner/config.toml
+
+# A small script to remove this runner from being registered with Gitlab.
 cat <<REM > /etc/rc.d/init.d/remove_gitlab_registration
 #!/bin/bash
 # chkconfig: 1356 99 03

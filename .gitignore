@@ -3,6 +3,7 @@
 
 # Module directory
 .terraform/
+.terraform.lock.hcl
 
 # keys
 *id_rsa*
@@ -19,6 +20,8 @@ config-terraform.sh
 **/node_modules/
 package*.json
 yarn.lock
+
+builds/
 
 # exceptions for semantic release
 !.release/package*
