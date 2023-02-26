@@ -127,32 +127,33 @@ By default the runner is registered on initial deployment. In previous versions 
 To register the runner automatically set the variable `gitlab_runner_registration_config["registration_token"]`. This token value can be found in your GitLab project, group, or global settings. For a generic runner you can find the token in the admin section. By default the runner will be locked to the target project, not run untagged. Below is an example of the configuration map.
 
 ```hcl
-gitlab_runner_registration_config = {
-  registration_token = "<registration token>"
-  tag_list           = "<your tags, comma separated>"
-  description        = "<some description>"
-  locked_to_project  = "true"
-  run_untagged       = "false"
-  maximum_timeout    = "3600"
-  access_level       = "<not_protected OR ref_protected, ref_protected runner will only run on pipelines triggered on protected branches. Defaults to not_protected>"
+module "gitlab_runner" {
+  ...
+
+  gitlab_runner_registration_config = {
+    registration_token = aws_ssm_parameter.gitlab_runner_registration_token.value
+    tag_list           = "<your tags, comma separated>"
+    description        = "<some description>"
+    locked_to_project  = "true"
+    run_untagged       = "false"
+    maximum_timeout    = "3600"
+    access_level       = "<not_protected OR ref_protected, ref_protected runner will only run on pipelines triggered on protected branches. Defaults to not_protected>"
+  }
+}
+
+# obtain this token from your Gitlab instance and store it manually in the SSM parameter
+resource "aws_ssm_parameter" "gitlab_runner_registration_token" {
+  name        = "gitlab-registration-token"
+  type        = "SecureString"
+  value       = "Please fill manually."
+  description = "Gitlab registration token for a new runner."
+
+  lifecycle {
+    # the secret is set manually
+    ignore_changes = [value]
+  }
 }
 ```
-
-For migration to the new setup simply add the runner token to the parameter store. Once the runner is started it will lookup the required values via the parameter store. If the value is `null` a new runner will be registered and a new token created/stored.
-
-```sh
-# set the following variables, look up the variables in your Terraform config.
-# see your Terraform variables to fill in the vars below.
-aws-region=<${var.aws_region}>
-token=<runner-token-see-your-gitlab-runner>
-parameter-name=<${var.environment}>-<${var.secure_parameter_store_runner_token_key}>
-
-aws ssm put-parameter --overwrite --type SecureString  --name "${parameter-name}" --value ${token} --region "${aws-region}"
-```
-
-Once you have created the parameter, you must remove the variable `runners_token` from your config. The next time your GitLab runner instance is created it will look up the token from the SSM parameter store.
-
-Finally, the runner still supports the manual runner creation. No changes are required. Please keep in mind that this setup will be removed in future releases.
 
 ### Auto Scaling Group
 
@@ -556,7 +557,6 @@ Made with [contributors-img](https://contrib.rocks).
 | <a name="input_runners_volumes_tmpfs"></a> [runners\_volumes\_tmpfs](#input\_runners\_volumes\_tmpfs) | Mount a tmpfs in runner container. https://docs.gitlab.com/runner/executors/docker.html#mounting-a-directory-in-ram | <pre>list(object({<br>    volume  = string<br>    options = string<br>  }))</pre> | `[]` | no |
 | <a name="input_schedule_config"></a> [schedule\_config](#input\_schedule\_config) | Map containing the configuration of the ASG scale-out and scale-in for the runner instance. Will only be used if enable\_schedule is set to true. | `map(any)` | <pre>{<br>  "scale_in_count": 0,<br>  "scale_in_recurrence": "0 18 * * 1-5",<br>  "scale_out_count": 1,<br>  "scale_out_recurrence": "0 8 * * 1-5"<br>}</pre> | no |
 | <a name="input_secure_parameter_store_runner_sentry_dsn"></a> [secure\_parameter\_store\_runner\_sentry\_dsn](#input\_secure\_parameter\_store\_runner\_sentry\_dsn) | The Sentry DSN name used to store the Sentry DSN in Secure Parameter Store | `string` | `"sentry-dsn"` | no |
-| <a name="input_secure_parameter_store_runner_token_key"></a> [secure\_parameter\_store\_runner\_token\_key](#input\_secure\_parameter\_store\_runner\_token\_key) | The key name used store the Gitlab runner token in Secure Parameter Store | `string` | `"runner-token"` | no |
 | <a name="input_sentry_dsn"></a> [sentry\_dsn](#input\_sentry\_dsn) | Sentry DSN of the project for the runner to use (uses legacy DSN format) | `string` | `"__SENTRY_DSN_REPLACED_BY_USER_DATA__"` | no |
 | <a name="input_subnet_id"></a> [subnet\_id](#input\_subnet\_id) | Subnet id used for the runner and executors. Must belong to the VPC specified above. | `string` | `""` | no |
 | <a name="input_subnet_id_runners"></a> [subnet\_id\_runners](#input\_subnet\_id\_runners) | Deprecated! Use subnet\_id instead. List of subnets used for hosting the gitlab-runners. | `string` | `""` | no |
