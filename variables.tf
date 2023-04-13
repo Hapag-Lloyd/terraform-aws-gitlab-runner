@@ -950,7 +950,7 @@ variable "runner_extra_config" {
 }
 
 variable "debug" {
-  description = <<EOT
+  description = <<-EOT
     Enable debug settings for development
 
     output_runner_config_to_file: When enabled, outputs the rendered config.toml file in the root module. This can
@@ -964,8 +964,8 @@ variable "debug" {
     output_runner_config_to_file    = bool
     output_runner_user_data_to_file = bool
   })
-  default        = object({
+  default        = {
     output_runner_config_to_file    = false
     output_runner_user_data_to_file = false
-  })
+  }
 }
